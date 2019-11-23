@@ -1,35 +1,52 @@
+//M5StickC viveration metronome.
+// By Takuhiro Mizuno
+//https://twitter.com/mizunon
+
+//Usage:
+// BtnA('M5'): Start/Stop metronome.
+// PowerBtn(upper side): Tempo Up or Volume Up.
+// BtnB(lower side): Tempo down or Volume Down.
+// lond press BtnB: Change tempo cursol.
+
 #include <M5StickC.h>
 
-//default.csvの書き換えが必要
+//You may need change 'default.csv' for use EEPROM.
 //eeprom,   data, 0x99,  0x290000,0x1000,
 //spiffs,   data, spiffs,  0x291000,0x16F000,
 #include <EEPROM.h>
 
-// メトロノーム音を設定
-#define clinkTone 1046 //C6
-
+//Metronome tone. default:C6
+#define clinkTone 1046
+//M5StickC Speaker Hat.
 #define GPIO_SPEAKER_PIN 26
+#define GPIO_SPEAKER_SD_PIN 0
+#define GPIO_SPEAKER_NC_PIN 36
 
-// テンポ変数 デフォルト120
+//Grove - Vibration Motor SKU:105020003
+//Grove port. I2C clock -> DOUT
+#define GPIO_VIBE_PIN  33
+//Grove port. I2C data -> DOUT(NC)
+#define GPIO_VIBE_NC_PIN 32
+
+
+//Global variables.//
+
+// Tempo(bpm). default:120
 int bpm = 120;
-unsigned long playProgress = 0;
-
+//Click volume. default:100
 int volume = 100;
 
-// 音符変数の宣言
-unsigned long noteBaseMs; // 1テンポあたりのms
-
-bool clickLEDOn = false;
-
-// ステート変数の宣言
-int runstate = 0;
+unsigned long noteBaseMs;
+unsigned long playProgressMs = 0;
+bool isClickLEDOn = false;
+bool isPlay = 0;
 int bpmCursol = 0;
 
-int vibePinCtrl = 33;
-int vivePinData = 32;
+double vBattery = 0.0;
+int batteryP100 = 0;
 
-double vbat = 0.0;
-int battery_p100 = 0;
+
+// Functions //
 
 void ReadConfig(){
   if( EEPROM.read(0) == 'M' && EEPROM.read(1) == 'T' ){
@@ -55,64 +72,62 @@ int backGroundColor = BLACK;
 int prevBackGroundColor = BLACK;
 void PrintInfos()
 {
-  //for(;;){
-    if( 20 <= battery_p100 ) backGroundColor = BLACK;
-    else backGroundColor = RED;
+  if( 20 <= batteryP100 ) backGroundColor = BLACK;
+  else backGroundColor = RED;
 
-    if( prevBackGroundColor != backGroundColor ) M5.Lcd.fillScreen(backGroundColor);
-    prevBackGroundColor = backGroundColor;
-    
-    if( runstate == 0) M5.Lcd.setTextColor(GREEN, backGroundColor);
-    else M5.Lcd.setTextColor(PINK, backGroundColor);
-    
-    M5.Lcd.setCursor(0, 0);
-    M5.Lcd.print("Tempo:");
-    M5.Lcd.print(bpm);
-    M5.Lcd.println("  ");
+  if( prevBackGroundColor != backGroundColor ) M5.Lcd.fillScreen(backGroundColor);
+  prevBackGroundColor = backGroundColor;
   
-    M5.Lcd.print("Batt :");
-    M5.Lcd.print(battery_p100);
-    M5.Lcd.println("%  ");
-    if( runstate == 0 ){
-      //M5.Lcd.println("           ");
-      M5.Lcd.println("Change tempo");
-      M5.Lcd.print(" Up  :+"); M5.Lcd.printf("%3d",(int)pow(10, bpmCursol)); M5.Lcd.println("  ");
-      M5.Lcd.print(" Down:-"); M5.Lcd.printf("%3d",(int)pow(10, bpmCursol)); M5.Lcd.println("  ");
-    }else{
-      M5.Lcd.println("Fight! Mai!  ");
-      M5.Lcd.println("Up  :Vol Up  ");
-      M5.Lcd.println("Down:Vol Down");
-    }
+  if( !isPlay ) M5.Lcd.setTextColor(GREEN, backGroundColor);
+  else M5.Lcd.setTextColor(PINK, backGroundColor);
+  
+  M5.Lcd.setCursor(0, 0);
+  M5.Lcd.print("Tempo:");
+  M5.Lcd.print(bpm);
+  M5.Lcd.println("  ");
 
-    while( clickLEDOn ){
-      dacWrite(GPIO_SPEAKER_PIN, 0);
-      delayMicroseconds(500);
-      dacWrite(GPIO_SPEAKER_PIN, volume - 50);
-      delayMicroseconds(500);
-    }
-    delay(1UL);
-  //}
+  M5.Lcd.print("Batt :");
+  M5.Lcd.print(batteryP100);
+  M5.Lcd.println("%  ");
+  
+  if( !isPlay ){
+    M5.Lcd.println("Change tempo");
+    M5.Lcd.print(" Up  :+"); M5.Lcd.printf("%3d",(int)pow(10, bpmCursol)); M5.Lcd.println("   ");
+    M5.Lcd.print(" Down:-"); M5.Lcd.printf("%3d",(int)pow(10, bpmCursol)); M5.Lcd.println("   ");
+  }else{
+    M5.Lcd.println("Fight! Mai!  ");
+    M5.Lcd.println("Up  :Vol Up  ");
+    M5.Lcd.println("Down:Vol Down");
+  }
+
+  while( isClickLEDOn ){
+    dacWrite(GPIO_SPEAKER_PIN, volume - 50);
+    delayMicroseconds(500);
+    dacWrite(GPIO_SPEAKER_PIN, 0);
+    delayMicroseconds(500);
+  }
+  
+  delay(10UL);
 }
 
-bool isCursolChange = false;
+bool isCursolChanged = false;
 void SelectBPM()
 {
-  if( isCursolChange && M5.BtnB.isReleased() )
+  if( isCursolChanged && M5.BtnB.isReleased() )
   {
-    isCursolChange = false;
-  }else if (M5.BtnB.pressedFor(1000UL) && isCursolChange == false)
+    isCursolChanged = false;
+  }else if (M5.BtnB.pressedFor(1000UL) && isCursolChanged == false)
   {
     bpmCursol++;
     if( 2 < bpmCursol ) bpmCursol = 0;
 
-    isCursolChange = true;
+    isCursolChanged = true;
   }else if (M5.BtnB.wasReleasefor(100UL))
   {
     bpm -= pow(10, bpmCursol);
     if( bpm < 30 ) bpm = 30;
     AdjustBPM();
     
-    //PrintInfos();
     writeConfig();
   }
   else if (M5.Axp.GetBtnPress() == 2)
@@ -128,12 +143,11 @@ void SelectBPM()
 
 void AdjustBPM()
 {
-  // 音の長さをBPMに合わせる
   const unsigned long bpmBaseMs = 60000UL;
   
   noteBaseMs = (unsigned long)(bpmBaseMs / (unsigned long)bpm);
 
-  playProgress = 0;
+  playProgressMs = 0;
 }
 
 void SelectVolume()
@@ -142,18 +156,14 @@ void SelectVolume()
   {
     volume -= 50;
     if( volume < 0 ) volume = 0;
-    //M5.Speaker.setVolume(volume);
     
-    //PrintInfos();
     writeConfig();
   }
   else if (M5.Axp.GetBtnPress() == 2)
   {
     volume += 50;
     if( 300 < volume ) volume = 300;
-    //M5.Speaker.setVolume(volume);
     
-    //PrintInfos();
     writeConfig();
   }
 }
@@ -161,90 +171,67 @@ void SelectVolume()
 
 void MetronomePlay()
 {
-  if( playProgress <= 0 ) playProgress = noteBaseMs;
+  if( playProgressMs <= 0 ) playProgressMs = noteBaseMs;
 
-  if( (noteBaseMs - playProgress) == 0 ){
+  if( (noteBaseMs - playProgressMs) == 0 ){
     if( 0 < volume ){
-      //M5.Speaker.tone( clinkTone );
       digitalWrite(M5_LED, LOW);
-      clickLEDOn = true;
+      isClickLEDOn = true;
     }
-    digitalWrite( vibePinCtrl, HIGH );
-  }else if( (noteBaseMs - playProgress) >= 50UL ){
-    //M5.Speaker.mute();
+    digitalWrite( GPIO_VIBE_PIN, HIGH );
+  }else if( (noteBaseMs - playProgressMs) >= 50UL ){
     digitalWrite(M5_LED, HIGH);
-    clickLEDOn = false;
-    digitalWrite( vibePinCtrl, LOW );
+    isClickLEDOn = false;
+    digitalWrite( GPIO_VIBE_PIN, LOW );
   }
-  //M5.Speaker.update();
 
-  if( 50UL < playProgress){
+  if( 50UL < playProgressMs){
     delay(50UL);
-    playProgress -= 50UL;
+    playProgressMs -= 50UL;
   }else{
-    delay(playProgress);
-    playProgress = 0;
+    delay(playProgressMs);
+    playProgressMs = 0;
   }
 }
 
-void CheckRunState()
-{
-  if (M5.BtnA.wasPressed())
-  {
-    switch (runstate)
-    {
-    case 0:
-      AdjustBPM();
-      runstate = 1;
-      break;
-
-    case 1:
-      runstate = 0;
-      break;
-    }
-    
-    //PrintInfos();
-  }
-}
-
-int lcd_rewrite_counter = 0;
-int lcd_rewrite_pbat = 0;
 void loopClickTask(void *pvParameters)
 {
   for(;;){
     M5.update();
-  
-    vbat = M5.Axp.GetVbatData() * 1.1 / 1000;
-    battery_p100 = (int)((vbat - 3.2) / 1.0 * 100);
-    if( battery_p100 > 100 ) battery_p100 = 100;
-    if( battery_p100 <   0 ) battery_p100 = 0;
-  
-    CheckRunState();
-    if (runstate == 1)
-    {
-      MetronomePlay();
-      SelectVolume();
-  
-      if( battery_p100 % 10 == 0 ){
-        if( lcd_rewrite_pbat != battery_p100 ){
-          //PrintInfos();
-          lcd_rewrite_pbat = battery_p100;
-        }else{
-          lcd_rewrite_pbat = battery_p100;
-        }
-      }
+    
+    vBattery = M5.Axp.GetVbatData() * 1.1 / 1000;
+    batteryP100 = (int)((vBattery - 3.2) / 1.0 * 100);
+    if( batteryP100 > 100 ) batteryP100 = 100;
+    if( batteryP100 <   0 ) batteryP100 = 0;
+    
+    if (M5.BtnA.wasPressed()){
+      isPlay = !isPlay;
       
+      if( isPlay ){
+        AdjustBPM();
+        
+        digitalWrite( GPIO_SPEAKER_SD_PIN, HIGH );
+      }else{
+        isClickLEDOn = false;
+
+        //LED OFF.
+        digitalWrite( M5_LED, HIGH );
+        //Viberation OFF.
+        digitalWrite( GPIO_VIBE_PIN, LOW );
+        //Speaker noiseproof.
+        digitalWrite( GPIO_SPEAKER_SD_PIN, LOW );
+      }
+    }
+    
+    if ( isPlay )
+    {
+      SelectVolume();
+      
+      MetronomePlay();
+
+      //delay in MetronomePlay().
     }else{
       SelectBPM();
-  
-      //M5.Speaker.mute();
-      digitalWrite( M5_LED, HIGH );
-      clickLEDOn = false;
-      
-      digitalWrite( vibePinCtrl, LOW );
-  
-      //PrintInfos();
-      lcd_rewrite_pbat = 0;
       
       delay(100UL);
     }
@@ -255,11 +242,11 @@ void setup()
 {
   M5.begin();
 
-  pinMode( vibePinCtrl, OUTPUT );
-  digitalWrite( vibePinCtrl, LOW );
+  pinMode( GPIO_VIBE_PIN, OUTPUT );
+  digitalWrite( GPIO_VIBE_PIN, LOW );
   
-  pinMode( vivePinData, OUTPUT );
-  digitalWrite( vivePinData, LOW );
+  pinMode( GPIO_VIBE_NC_PIN, OUTPUT );
+  digitalWrite( GPIO_VIBE_NC_PIN, LOW );
 
   pinMode(M5_LED, OUTPUT);
   digitalWrite(M5_LED, HIGH);
@@ -267,7 +254,13 @@ void setup()
   pinMode(GPIO_SPEAKER_PIN, OUTPUT);
   dacWrite( GPIO_SPEAKER_PIN, 0 );
 
-  // デフォルトは240MHzで、240, 160, 80, 40, 20, 10から選択可
+  pinMode( GPIO_SPEAKER_SD_PIN, OUTPUT );
+  digitalWrite( GPIO_SPEAKER_SD_PIN, LOW );
+
+  pinMode( GPIO_SPEAKER_NC_PIN, OUTPUT );
+  digitalWrite( GPIO_SPEAKER_NC_PIN, LOW );
+
+  // defalut:240MHz 240, 160, 80, 40, 20, 10
   while(!setCpuFrequencyMhz(240)){;}
   Serial.print("getCpuFrequencyMhz:");
   Serial.println(getCpuFrequencyMhz());
@@ -285,18 +278,17 @@ void setup()
   M5.Lcd.setTextColor(GREEN, BLACK);
   M5.Lcd.setTextSize(2);
 
-  vbat = M5.Axp.GetVbatData() * 1.1 / 1000;
+  vBattery = M5.Axp.GetVbatData() * 1.1 / 1000;
   Serial.print("M5.Axp.GetVbatData:");
-  Serial.println( vbat );
+  Serial.println( vBattery );
 
-  M5.BtnA.read();  //ボタン状況更新
+  M5.BtnA.read();
 
   EEPROM.begin(8);
   if (M5.BtnA.isPressed()) writeConfig();
   ReadConfig();
 
   AdjustBPM();
-  //PrintInfos();
 
   //fname, fnameStr, StackSize, NULL, priority, taskHandle, CoreID
   xTaskCreateUniversal(loopClickTask, "loopClickTask", 4096, NULL, 1, NULL, 0);
