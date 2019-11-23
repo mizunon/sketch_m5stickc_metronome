@@ -5,7 +5,7 @@
   
 https://twitter.com/mizunon
 
-## That is this?
+## What is this?
 This is M5StickC metronome with viberaion and light and click sound.
 
 ## Component
