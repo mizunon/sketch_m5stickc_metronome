@@ -38,17 +38,15 @@ M5StickCを使った、メトロノームです。光と振動、音でビート
 
 ## コンポーネント
 ### M5StickC
-https://m5stack.com/collections/m5-core/products/stick-c  
-https://m5stack.com/collections/m5-core/products/m5stickc-development-kit-with-hat  
+https://www.switch-science.com/catalog/5517/  
 
 ### Grove - Vibration Motor. SKU:105020003
 M5StickCのGroveポートに接続するとビートを振動で伝えてくれます。  
-https://www.seeedstudio.com/Grove-Vibration-Motor.html  
+https://www.switch-science.com/catalog/828/  
 
 ### M5StickC Speaker Hat
 M5StickCのI/Oポートに接続するとビートを音で伝えてくれます。
-Include in 'M5StickC+ Development Kit with Hat'.  
-https://m5stack.com/products/m5stickc-speaker-hat  
+https://www.switch-science.com/catalog/5754/  
 
 ## Usage
 ### ボタンA('M5'って書いてあるやつ)
