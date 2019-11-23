@@ -36,10 +36,11 @@ int bpm = 120;
 //Click volume. default:100
 int volume = 100;
 
-unsigned long noteBaseMs;
+//bpmBase in microsec
+unsigned long bpmBaseMs;
 unsigned long playProgressMs = 0;
 bool isClickLEDOn = false;
-bool isPlay = 0;
+bool isPlay = false;
 int bpmCursol = 0;
 
 double vBattery = 0.0;
@@ -68,6 +69,7 @@ void writeConfig(){
   EEPROM.commit();
 }
 
+
 int backGroundColor = BLACK;
 int prevBackGroundColor = BLACK;
 void PrintInfos()
@@ -91,9 +93,11 @@ void PrintInfos()
   M5.Lcd.println("%  ");
   
   if( !isPlay ){
-    M5.Lcd.println("Change tempo");
-    M5.Lcd.print(" Up  :+"); M5.Lcd.printf("%3d",(int)pow(10, bpmCursol)); M5.Lcd.println("   ");
-    M5.Lcd.print(" Down:-"); M5.Lcd.printf("%3d",(int)pow(10, bpmCursol)); M5.Lcd.println("   ");
+    M5.Lcd.println("Change tempo ");
+    //M5.Lcd.print(" Up  :+"); M5.Lcd.printf("%3d",(int)pow(10, bpmCursol)); M5.Lcd.println("   ");
+    //M5.Lcd.print(" Down:-"); M5.Lcd.printf("%3d",(int)pow(10, bpmCursol)); M5.Lcd.println("   ");
+    M5.Lcd.print  (" UpDn:+-"); M5.Lcd.printf("%3d",(int)pow(10, bpmCursol)); M5.Lcd.println("  ");
+    M5.Lcd.println(" DnLp:Chg cur");
   }else{
     M5.Lcd.println("Fight! Mai!  ");
     M5.Lcd.println("Up  :Vol Up  ");
@@ -108,6 +112,7 @@ void PrintInfos()
   }
   
   delay(10UL);
+
 }
 
 bool isCursolChanged = false;
@@ -143,9 +148,11 @@ void SelectBPM()
 
 void AdjustBPM()
 {
-  const unsigned long bpmBaseMs = 60000UL;
-  
-  noteBaseMs = (unsigned long)(bpmBaseMs / (unsigned long)bpm);
+  // 60sec * 1000miillis * 1000micros
+  const unsigned long bpm1BaseMs = 60000000UL;
+
+  if( bpm < 30 ) bpm = 120;
+  bpmBaseMs = (unsigned long)(bpm1BaseMs / (unsigned long)bpm);
 
   playProgressMs = 0;
 }
@@ -168,41 +175,52 @@ void SelectVolume()
   }
 }
 
-
+unsigned long surplusMillis;
+unsigned long surplusMicros;
 void MetronomePlay()
 {
-  if( playProgressMs <= 0 ) playProgressMs = noteBaseMs;
+  if( playProgressMs <= 0 ) playProgressMs = bpmBaseMs;
 
-  if( (noteBaseMs - playProgressMs) == 0 ){
+  if( (bpmBaseMs - playProgressMs) == 0 ){
     if( 0 < volume ){
       digitalWrite(M5_LED, LOW);
       isClickLEDOn = true;
     }
     digitalWrite( GPIO_VIBE_PIN, HIGH );
-  }else if( (noteBaseMs - playProgressMs) >= 50UL ){
+  }else if( (bpmBaseMs - playProgressMs) >= 50000UL ){
     digitalWrite(M5_LED, HIGH);
     isClickLEDOn = false;
     digitalWrite( GPIO_VIBE_PIN, LOW );
   }
 
-  if( 50UL < playProgressMs){
+  if( 50000UL < playProgressMs){
     delay(50UL);
-    playProgressMs -= 50UL;
+    playProgressMs -= 50000UL;
   }else{
-    delay(playProgressMs);
+    surplusMillis = playProgressMs / 1000UL;
+    surplusMicros = playProgressMs - (1000UL * surplusMillis );
+    
+    if( 0 < surplusMillis ) delay(surplusMillis);
+    if( 0 < surplusMicros ) delayMicroseconds(surplusMicros);
+    
     playProgressMs = 0;
   }
 }
 
+unsigned long prevTime = 0;
 void loopClickTask(void *pvParameters)
 {
   for(;;){
     M5.update();
     
-    vBattery = M5.Axp.GetVbatData() * 1.1 / 1000;
-    batteryP100 = (int)((vBattery - 3.2) / 1.0 * 100);
-    if( batteryP100 > 100 ) batteryP100 = 100;
-    if( batteryP100 <   0 ) batteryP100 = 0;
+    if( (millis() - prevTime) > 1000UL ){
+      vBattery = M5.Axp.GetVbatData() * 1.1 / 1000;
+      batteryP100 = (int)((vBattery - 3.2) / 1.0 * 100);
+      if( batteryP100 > 100 ) batteryP100 = 100;
+      if( batteryP100 <   0 ) batteryP100 = 0;
+  
+      prevTime = millis();
+    }
     
     if (M5.BtnA.wasPressed()){
       isPlay = !isPlay;
@@ -228,7 +246,6 @@ void loopClickTask(void *pvParameters)
       SelectVolume();
       
       MetronomePlay();
-
       //delay in MetronomePlay().
     }else{
       SelectBPM();
