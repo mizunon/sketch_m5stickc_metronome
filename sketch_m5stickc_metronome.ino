@@ -177,22 +177,24 @@ void SelectVolume()
 
 unsigned long surplusMillis;
 unsigned long surplusMicros;
+unsigned long diffMicros;
 void MetronomePlay()
 {
   if( playProgressMs <= 0 ) playProgressMs = bpmBaseMs;
 
-  if( (bpmBaseMs - playProgressMs) == 0 ){
+  diffMicros = bpmBaseMs - playProgressMs;
+  if( diffMicros == 0 ){
     if( 0 < volume ){
       digitalWrite(M5_LED, LOW);
       isClickLEDOn = true;
     }
     digitalWrite( GPIO_VIBE_PIN, HIGH );
-  }else if( (bpmBaseMs - playProgressMs) >= 50000UL ){
+  }else if( 50000UL <= diffMicros && diffMicros < 100000UL ){
     digitalWrite(M5_LED, HIGH);
     isClickLEDOn = false;
+  }else if( 100000UL <= diffMicros ){
     digitalWrite( GPIO_VIBE_PIN, LOW );
   }
-
   if( 50000UL < playProgressMs){
     delay(50UL);
     playProgressMs -= 50000UL;
