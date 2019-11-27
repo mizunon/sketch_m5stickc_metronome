@@ -9,6 +9,7 @@
 // lond press BtnB: Change tempo cursol.
 
 #include <M5StickC.h>
+#include <Wire.h>
 
 //You may need change 'default.csv' for use EEPROM.
 //eeprom,   data, 0x99,  0x290000,0x1000,
@@ -43,8 +44,10 @@ bool isClickLEDOn = false;
 bool isPlay = false;
 int bpmCursol = 0;
 
-double vBattery = 0.0;
+float vBattery = 0.0;
+float vBus = 0.0;
 int batteryP100 = 0;
+unsigned long chargeStartMs = 0;
 
 
 // Functions //
@@ -93,11 +96,18 @@ void PrintInfos()
   M5.Lcd.println("%  ");
   
   if( !isPlay ){
-    M5.Lcd.println("Change tempo ");
-    //M5.Lcd.print(" Up  :+"); M5.Lcd.printf("%3d",(int)pow(10, bpmCursol)); M5.Lcd.println("   ");
-    //M5.Lcd.print(" Down:-"); M5.Lcd.printf("%3d",(int)pow(10, bpmCursol)); M5.Lcd.println("   ");
-    M5.Lcd.print  (" UpDn:+-"); M5.Lcd.printf("%3d",(int)pow(10, bpmCursol)); M5.Lcd.println("  ");
-    M5.Lcd.println(" DnLp:Chg cur");
+    if( chargeStartMs <= 1 ){
+      M5.Lcd.println("Change tempo ");
+      //M5.Lcd.print(" Up  :+"); M5.Lcd.printf("%3d",(int)pow(10, bpmCursol)); M5.Lcd.println("   ");
+      //M5.Lcd.print(" Down:-"); M5.Lcd.printf("%3d",(int)pow(10, bpmCursol)); M5.Lcd.println("   ");
+      M5.Lcd.print  (" UpDn:+-"); M5.Lcd.printf("%3d",(int)pow(10, bpmCursol)); M5.Lcd.println("  ");
+      M5.Lcd.println(" DnLp:Chg cur");
+    }else{
+      M5.Lcd.setTextColor(WHITE, RED);
+      M5.Lcd.println("!!CHARGING!! ");
+      M5.Lcd.print  ("ShutdownIn:"); M5.Lcd.printf("%d",(int)( 5 - ((millis() - chargeStartMs)/1000) ) ); M5.Lcd.println("s");
+      M5.Lcd.println("AnyKey:Cancel");
+    }
   }else{
     M5.Lcd.println("Fight! Mai!  ");
     M5.Lcd.println("Up  :Vol Up  ");
@@ -209,6 +219,29 @@ void MetronomePlay()
   }
 }
 
+void AXP192_Write1Byte( uint8_t Addr ,  uint8_t Data )
+{
+	Wire1.beginTransmission(0x34);
+	Wire1.write(Addr);
+	Wire1.write(Data);
+	Wire1.endTransmission();
+}
+
+uint8_t AXP192_Read8bit( uint8_t Addr )
+{
+	Wire1.beginTransmission(0x34);
+	Wire1.write(Addr);
+	Wire1.endTransmission();
+	Wire1.requestFrom(0x34, 1);
+	return Wire1.read();
+}
+
+void AXP192_PowerOff()
+{
+    AXP192_Write1Byte(0x32, AXP192_Read8bit(0x32) | 0x80);
+}
+
+
 unsigned long prevTime = 0;
 void loopClickTask(void *pvParameters)
 {
@@ -216,11 +249,13 @@ void loopClickTask(void *pvParameters)
     M5.update();
     
     if( (millis() - prevTime) > 1000UL ){
-      vBattery = M5.Axp.GetVbatData() * 1.1 / 1000;
+      vBattery = M5.Axp.GetBatVoltage();
       batteryP100 = (int)((vBattery - 3.2) / 1.0 * 100);
       if( batteryP100 > 100 ) batteryP100 = 100;
       if( batteryP100 <   0 ) batteryP100 = 0;
-  
+      
+      vBus = M5.Axp.GetVBusVoltage();
+      
       prevTime = millis();
     }
     
@@ -229,6 +264,8 @@ void loopClickTask(void *pvParameters)
       
       if( isPlay ){
         AdjustBPM();
+        
+        chargeStartMs = 0;
         
         digitalWrite( GPIO_SPEAKER_SD_PIN, HIGH );
       }else{
@@ -250,8 +287,18 @@ void loopClickTask(void *pvParameters)
       MetronomePlay();
       //delay in MetronomePlay().
     }else{
-      SelectBPM();
-      
+      if( vBus < 4.5 ) chargeStartMs = 0;
+      else if( 4.5 <= vBus && chargeStartMs == 0 ) chargeStartMs = millis();
+
+      if( chargeStartMs == 0 ){
+        SelectBPM();
+      }else{
+        if( 1 < chargeStartMs && (millis() - chargeStartMs) >= 5000UL ) AXP192_PowerOff();
+        
+        if( M5.BtnA.wasPressed() || M5.BtnB.wasPressed() || M5.Axp.GetBtnPress() == 2 ){
+          chargeStartMs = 1;
+        }
+      }
       delay(100UL);
     }
   }
@@ -297,9 +344,13 @@ void setup()
   M5.Lcd.setTextColor(GREEN, BLACK);
   M5.Lcd.setTextSize(2);
 
-  vBattery = M5.Axp.GetVbatData() * 1.1 / 1000;
+  vBattery = M5.Axp.GetBatVoltage();
   Serial.print("M5.Axp.GetVbatData:");
   Serial.println( vBattery );
+  
+  float vin = M5.Axp.GetVBusVoltage();
+  Serial.print("M5.Axp.GetVBusVoltage:");
+  Serial.println( vin );
 
   M5.BtnA.read();
 
